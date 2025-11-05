@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.venv/
+
+# Visual Studio Code 설정
+.vscode/
+
+# 업로드된 파일 (사용자 업로드 결과물)
+uploads/
+
+# 실행/컴파일 결과물
+*.exe
+*.obj
+*.o
+*.out
+
+# 임시/로그 파일
+*.log
+*.tmp
+
+# OS 별 불필요한 파일
+.DS_Store
+Thumbs.db

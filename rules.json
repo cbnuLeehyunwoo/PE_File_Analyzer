@@ -1,0 +1,74 @@
+{
+  "signatures": [
+    {
+      "name": "프로세스 인젝션 (Process Injection)",
+      "description": "다른 프로세스의 메모리에 코드를 삽입하고 실행할 가능성이 높습니다. (Classic DLL Injection)",
+      "danger": "High",
+      "apis": [
+        "OpenProcess",
+        "VirtualAllocEx",
+        "WriteProcessMemory",
+        "CreateRemoteThread"
+      ],
+      "dlls": ["kernel32.dll"]
+    },
+    {
+      "name": "키로깅 (Keylogging)",
+      "description": "사용자의 키보드 입력을 가로채어 기록할 수 있습니다.",
+      "danger": "High",
+      "apis": [
+        "SetWindowsHookExA",
+        "GetMessageA"
+      ],
+      "dlls": ["user32.dll"]
+    },
+    {
+      "name": "네트워크 C2 통신 (Downloader)",
+      "description": "인터넷을 통해 특정 URL에서 추가 파일을 다운로드할 수 있습니다.",
+      "danger": "Medium",
+      "apis": [
+        "URLDownloadToFileA"
+      ],
+      "dlls": ["urlmon.dll"]
+    },
+    {
+      "name": "네트워크 C2 통신 (Bot/Backdoor)",
+      "description": "외부 서버와 직접 TCP 소켓 통신을 시도할 수 있습니다.",
+      "danger": "Medium",
+      "apis": [
+        "socket",
+        "connect"
+      ],
+      "dlls": ["ws2_32.dll"]
+    },
+    {
+      "name": "지속성 유지 (레지스트리 Run 키)",
+      "description": "시스템 재부팅 시 자동 실행을 위해 레지스트리 Run 키에 등록할 수 있습니다.",
+      "danger": "Medium",
+      "apis": [
+        "RegOpenKeyExA",
+        "RegSetValueExA"
+      ],
+      "dlls": ["advapi32.dll"]
+    },
+    {
+      "name": "동적 API 로드 (분석 회피)",
+      "description": "IAT에 API를 노출하지 않고 런타임에 동적으로 함수를 로드할 가능성이 있습니다. 정적 분석 우회 시도일 수 있습니다.",
+      "danger": "Low",
+      "apis": [
+        "LoadLibraryA",
+        "GetProcAddress"
+      ],
+      "dlls": ["kernel32.dll"]
+    },
+    {
+      "name": "디버거 탐지 (분석 회피)",
+      "description": "현재 프로세스가 디버깅 중인지 확인하여 분석을 방해할 수 있습니다.",
+      "danger": "Low",
+      "apis": [
+        "IsDebuggerPresent"
+      ],
+      "dlls": ["kernel32.dll"]
+    }
+  ]
+}
