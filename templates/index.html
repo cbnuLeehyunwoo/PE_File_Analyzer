@@ -2,159 +2,132 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>PE 파일 정적 분석기</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PE 악성코드 정밀 분석기</title>
+    <!-- Tailwind CSS (디자인용) -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* CSS는 수정할 필요가 없으므로 그대로 둡니다. */
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
-            background-color: #f8f9fa; 
-            color: #333; 
-            display: flex; 
-            justify-content: center; 
-            align-items: flex-start;
-            padding: 50px 20px;
-            min-height: 100vh;
-        }
-        .container { 
-            background: #fff; 
-            border-radius: 8px; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
-            padding: 40px; 
-            width: 100%;
-            max-width: 800px; 
-        }
-        h1 { 
-            text-align: center; 
-            color: #0d6efd; 
-            font-size: 2.2em;
-            margin-bottom: 40px;
-        }
-        .drop-zone {
-            border: none;
-            padding: 30px 0;
-            text-align: center;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-            margin-bottom: 20px;
-            border-radius: 8px;
-        }
-        .drop-zone.drag-over { background-color: #f0f6ff; }
-        .drop-zone p { margin: 0; font-size: 1.2em; color: #0d6efd; }
-        .drop-zone small { margin-top: 8px; display: block; color: #6c757d; }
-        #file-upload { display: none; }
-        .btn { 
-            background: #0d6efd; 
-            color: #fff; 
-            padding: 15px 20px; 
-            border: none; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            font-size: 1.1em; 
-            width: 100%; 
-            font-weight: bold;
-            transition: background 0.3s; 
-        }
-        .btn:hover { background: #0b5ed7; }
-        #results { margin-top: 40px; text-align: left; }
-        #results h2 { border-bottom: 2px solid #eee; padding-bottom: 10px; font-size: 1.5em; color: #343a40;}
-        .report-header { font-size: 1.2em; font-weight: bold; margin: 20px 0; }
-        .report-header .filename { color: #0d6efd; }
-        .no-threat { color: #008000; background: #e6f9e6; border-left: 5px solid #008000; padding: 15px; border-radius: 5px; }
-        .threat-card { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 15px; background: #fafafa; }
-        .threat-card.High { border-left: 5px solid #d90429; }
-        .threat-card.Medium { border-left: 5px solid #fca311; }
-        .threat-card.Low { border-left: 5px solid #00b4d8; }
-        .threat-header { padding: 15px; background: #f1f1f1; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; }
-        .threat-header strong { font-size: 1.2em; }
-        .threat-header .danger-tag { font-weight: bold; font-size: 0.9em; padding: 4px 12px; border-radius: 20px; color: #fff;}
-        .threat-header .danger-tag.High { background-color: #d90429; }
-        .threat-header .danger-tag.Medium { background-color: #fca311; color: #333; }
-        .threat-header .danger-tag.Low { background-color: #00b4d8; }
-        .threat-body { padding: 15px; }
-        .threat-body p { margin: 10px 0; }
-        .threat-body .label { font-weight: bold; color: #555; }
-        .threat-body code { background: #eee; padding: 2px 5px; border-radius: 3px; color: #c7254e; word-break: break-all; }
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700&display=swap');
+        body { font-family: 'Noto Sans KR', sans-serif; }
     </style>
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen p-6">
 
-    <div class="container">
-        <h1>PE 파일 정적 분석기</h1>
-        
-        <!-- ▼▼▼ 바로 이 부분의 오타를 수정했습니다! ▼▼▼ -->
-        <form action="/analyze" method="POST" enctype="multipart/form-data" id="upload-form">
-            <label for="file-upload" class="drop-zone" id="drop-zone-label">
-                <p>분석할 EXE/DLL 파일을 여기에 드래그 앤 드랍</p> 
-                <small>또는 클릭하여 파일 선택 (최대 16MB)</small>
-                <input type="file" name="file" id="file-upload" accept=".exe,.dll,.sys">
-                <p id="file-name" style="font-weight: bold; margin-top: 15px; color: #333;"></p>
-            </label>
-            <button type="submit" class="btn">분석 시작</button>
-        </form>     
+    <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden">
+        <!-- 헤더 -->
+        <div class="bg-slate-800 p-6 text-white text-center">
+            <h1 class="text-2xl font-bold">🛡️ AI 기반 PE 파일 위협 분석기</h1>
+            <p class="text-sm opacity-80 mt-1">Machine Learning & Heuristic Analysis</p>
+        </div>
 
-        <!-- 분석 결과 표시 HTML 구조는 그대로 사용 -->
-        {% if results is not none %}
-            <div id="results">
-                <h2>분석 결과</h2>
-                <p class="report-header"><span class="filename">"{{ filename }}"</span> 파일 분석 완료</p>
-
-                {% if results|length == 0 %}
-                    <div class="no-threat">
-                        ✅ 특이한 위협 행위가 발견되지 않았습니다. (정상 파일 가능성 높음)
-                    </div>
-                {% else %}
-                    <p>🚨 총 <strong>{{ results|length }}</strong>개의 잠재적 위협 행위가 탐지되었습니다.</p>
-                    
-                    {% for threat in results %}
-                        <div class="threat-card {{ threat.danger }}">
-                            <div class="threat-header">
-                                <strong>{{ threat.name }}</strong>
-                                <span class="danger-tag {{ threat.danger }}">{{ threat.danger }}</span>
-                            </div>
-                            <div class="threat-body">
-                                <p><span class="label">설명:</span> {{ threat.description }}</p>
-                                {% if threat.apis %}
-                                <p><span class="label">근거 API:</span> <code>{{ threat.apis|join(', ') }}</code></p>
-                                {% endif %}
-                            </div>
+        <!-- 메인 컨텐츠 -->
+        <div class="p-8">
+            <!-- 1. 업로드 폼 -->
+            <form action="/analyze" method="post" enctype="multipart/form-data" class="mb-8 border-b pb-8">
+                <div class="flex flex-col items-center justify-center w-full">
+                    <label for="dropzone-file" class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
+                        <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                            <p class="mb-2 text-sm text-gray-500"><span class="font-semibold">클릭하여 파일 업로드</span> 또는 드래그 앤 드롭</p>
+                            <p class="text-xs text-gray-500">EXE, DLL 파일 (최대 16MB)</p>
                         </div>
-                    {% endfor %}
+                        <input id="dropzone-file" type="file" name="file" class="hidden" accept=".exe,.dll" required />
+                    </label>
+                    <button type="submit" class="mt-4 px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition w-full">
+                        🚀 정밀 분석 시작
+                    </button>
+                </div>
+            </form>
+
+            <!-- 2. 결과 리포트 (report가 있을 때만 표시) -->
+            {% if report %}
+            <div class="animate-fade-in-up">
+                <h2 class="text-xl font-bold mb-4 flex items-center">
+                    📂 분석 결과: <span class="text-blue-600 ml-2">{{ report.filename }}</span>
+                </h2>
+
+                <!-- 2-1. 종합 판정 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <!-- 정적 분석 점수 -->
+                    <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <h3 class="font-bold text-gray-700 mb-2">📊 정적 분석 점수 (Risk Score)</h3>
+                        <div class="flex items-center">
+                            <div class="text-4xl font-extrabold mr-3 
+                                {% if report.risk_score >= 80 %}text-red-600{% elif report.risk_score >= 40 %}text-orange-500{% else %}text-green-600{% endif %}">
+                                {{ report.risk_score }}
+                            </div>
+                            <span class="text-sm text-gray-500">/ 100점</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">높을수록 패킹/난독화 가능성 높음</p>
+                    </div>
+
+                    <!-- AI ML 예측 -->
+                    <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <h3 class="font-bold text-gray-700 mb-2">🤖 AI(머신러닝) 예측</h3>
+                        {% if report.ml_probability != -1 %}
+                            <div class="flex items-center">
+                                <div class="text-4xl font-extrabold mr-3 
+                                    {% if report.ml_probability >= 70 %}text-red-600{% elif report.ml_probability >= 40 %}text-orange-500{% else %}text-green-600{% endif %}">
+                                    {{ report.ml_probability }}%
+                                </div>
+                                <span class="text-sm text-gray-500">악성 확률</span>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1">
+                                엔트로피: {{ report.ml_features[0]|round(2) }} | 
+                                API 수: {{ report.ml_features[2] }}개
+                            </div>
+                        {% else %}
+                            <p class="text-gray-400">scikit-learn 모듈이 없어 비활성화됨</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- 2-2. 상세 탐지 내용 -->
+                <div class="mb-6">
+                    <h3 class="font-bold text-gray-800 border-l-4 border-red-500 pl-3 mb-3">🔍 상세 탐지 내역</h3>
+                    <ul class="space-y-2 text-sm">
+                        <!-- Risk Details -->
+                        {% for detail in report.risk_details %}
+                            <li class="flex items-start text-orange-700 bg-orange-50 p-2 rounded">
+                                <span class="mr-2">⚠️</span> {{ detail }}
+                            </li>
+                        {% endfor %}
+
+                        <!-- Threats (Rules) -->
+                        {% for threat in report.threats %}
+                            <li class="flex items-start text-red-700 bg-red-50 p-2 rounded">
+                                <span class="mr-2">🚨</span> 
+                                <div>
+                                    <span class="font-bold">[{{ threat.name }}]</span> {{ threat.description }}
+                                    <br><span class="text-xs text-gray-500">관련 API: {{ ', '.join(threat.apis) }}</span>
+                                </div>
+                            </li>
+                        {% endfor %}
+
+                        {% if not report.risk_details and not report.threats %}
+                            <li class="text-green-600 bg-green-50 p-2 rounded">✅ 특이한 위협 요소가 발견되지 않았습니다.</li>
+                        {% endif %}
+                    </ul>
+                </div>
+
+                {% if report.error %}
+                <div class="bg-red-100 text-red-700 p-4 rounded-lg">
+                    ❌ 오류 발생: {{ report.error }}
+                </div>
                 {% endif %}
+
             </div>
-        {% endif %}
+            {% endif %}
+        </div>
     </div>
 
-    <!-- JavaScript 부분은 수정할 필요 없습니다. -->
     <script>
-        const dropZone = document.getElementById('drop-zone-label');
-        const fileInput = document.getElementById('file-upload');
-        const fileNameDisplay = document.getElementById('file-name');
-        const dropZoneText = dropZone.querySelector('p');
-        const originalText = dropZoneText.textContent;
-
-        dropZone.addEventListener('click', () => fileInput.click());
-        
-        fileInput.addEventListener('change', () => {
-            if (fileInput.files.length > 0) {
-                fileNameDisplay.textContent = `선택된 파일: ${fileInput.files[0].name}`;
+        // 파일 선택 시 이름 표시 스크립트
+        const fileInput = document.getElementById('dropzone-file');
+        fileInput.addEventListener('change', function(e) {
+            if(e.target.files.length > 0) {
+                document.querySelector('.font-semibold').textContent = "선택됨: " + e.target.files[0].name;
             }
         });
-
-        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, preventDefaults, false);
-        });
-        ['dragenter', 'dragover'].forEach(eventName => {
-            dropZone.addEventListener(eventName, () => dropZone.classList.add('drag-over'), false);
-        });
-        ['dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, () => dropZone.classList.remove('drag-over'), false);
-        });
-        dropZone.addEventListener('drop', (e) => {
-            fileInput.files = e.dataTransfer.files;
-            fileNameDisplay.textContent = `선택된 파일: ${fileInput.files[0].name}`;
-        }, false);
     </script>
-
 </body>
 </html>
