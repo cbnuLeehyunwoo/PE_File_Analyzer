@@ -1,139 +1,213 @@
 import pefile
 import json
-import sys
 import os
+import math
+import joblib
+import numpy as np
+from collections import Counter
+
+# --- ML 라이브러리 로드 시도 (없어도 실행 가능하도록 처리) ---
+try:
+    from sklearn.ensemble import RandomForestClassifier
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    print("⚠️ scikit-learn 미설치: ML 기능이 비활성화됩니다. (pip install scikit-learn)")
 
 class PEAnalyzer:
-    """
-    PE 파일의 IAT를 분석하여 잠재적 위협 행위를 예측하는 도구
-    """
+    def __init__(self, rules_file='rules.json', model_path='pe_model.pkl'):
+        """
+        초기화 단계: 시그니처 룰 로드 및 ML 모델 준비
+        """
+        self.rules = []
+        self.model_path = model_path
+        
+        # 1. 룰 파일 로드
+        if os.path.exists(rules_file):
+            try:
+                with open(rules_file, 'r', encoding='utf-8') as f:
+                    self.rules = json.load(f).get('signatures', [])
+            except Exception as e:
+                print(f"[!] 룰 로드 실패: {e}")
+        
+        # 2. ML 모델 초기화 (Layer 3)
+        self.model = None
+        if ML_AVAILABLE:
+            self.load_or_train_model()
 
-    def __init__(self, rules_file):
-        """
-        분석기 초기화 시, 위협 행위 룰을 로드합니다.
-        """
-        try:
-            with open(rules_file, 'r', encoding='utf-8') as f:
-                self.rules = json.load(f)['signatures']
-            print(f"✅ {len(self.rules)}개의 위협 시그니처를 로드했습니다.\n")
-        except FileNotFoundError:
-            print(f"[오류] 룰 파일({rules_file})을 찾을 수 없습니다.")
-            sys.exit(1)
-        except json.JSONDecodeError:
-            print(f"[오류] 룰 파일({rules_file})의 형식이 올바르지 않습니다.")
-            sys.exit(1)
+    def _calculate_entropy(self, data):
+        """Layer 1: 섀넌 엔트로피 계산 (무작위성 측정)"""
+        if not data: return 0.0
+        occ = Counter(data)
+        length = len(data)
+        return -sum((c/length) * math.log2(c/length) for c in occ.values())
 
-    def parse_iat(self, filepath):
+    def load_or_train_model(self):
+        """ML 모델 로드 또는 데모용 즉석 학습"""
+        if os.path.exists(self.model_path):
+            try:
+                self.model = joblib.load(self.model_path)
+                return
+            except: pass
+
+        # 모델이 없으면 데모 데이터로 학습 (보고서용 데모 로직)
+        # Features: [AvgEntropy, Sections, Imports, Ratio, SuspiciousName]
+        print("[*] 학습된 모델이 없어 데모 데이터로 학습을 진행합니다...")
+        X = [
+            [4.5, 5, 120, 0.95, 0], # 정상 예시
+            [5.2, 4, 80, 0.98, 0],  # 정상 예시
+            [7.8, 8, 5, 0.2, 1],    # 악성 예시 (고엔트로피, 적은 임포트)
+            [7.2, 3, 10, 0.1, 1]    # 악성 예시
+        ]
+        y = [0, 0, 1, 1] # 0:정상, 1:악성
+        self.model = RandomForestClassifier(n_estimators=10, random_state=42)
+        self.model.fit(X, y)
+        joblib.dump(self.model, self.model_path)
+
+    def extract_ml_features(self, pe):
+        """ML 분석을 위한 특징 벡터 추출"""
+        # 1. 엔트로피 특징
+        entropies = [self._calculate_entropy(s.get_data()) for s in pe.sections]
+        avg_entropy = sum(entropies)/len(entropies) if entropies else 0
+        
+        # 2. 임포트 함수 개수
+        num_imports = 0
+        if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
+            for entry in pe.DIRECTORY_ENTRY_IMPORT:
+                num_imports += len(entry.imports)
+        
+        # 3. 데이터 비율 (Raw vs Virtual)
+        ratios = [s.SizeOfRawData / s.Misc_VirtualSize for s in pe.sections if s.Misc_VirtualSize > 0]
+        avg_ratio = sum(ratios)/len(ratios) if ratios else 0
+        
+        # 4. 의심스러운 섹션명
+        suspicious_names = ['UPX', '.packed', '.aspack', 'FSG', 'TE']
+        has_suspicious = 0
+        for sec in pe.sections:
+            sec_name = sec.Name.decode('utf-8', errors='ignore').strip('\x00')
+            if any(s in sec_name for s in suspicious_names):
+                has_suspicious = 1
+                break
+        
+        return [avg_entropy, len(pe.sections), num_imports, avg_ratio, has_suspicious]
+
+    def analyze_file(self, filepath):
         """
-        PE 파일의 IAT를 파싱하여 {DLL: [API1, API2, ...]} 딕셔너리를 반환합니다.
-        (수정됨: finally 블록에서 pe.close()를 호출하여 파일 핸들을 해제)
+        [핵심 로직] 3-Layer 분석 수행
+        Layer 1: 엔트로피 -> Layer 2: 정적 분석(Rule) -> Layer 3: ML 예측
         """
-        iat_info = {}
-        imported_apis = set()
-        pe = None
+        report = {
+            "filename": os.path.basename(filepath),
+            "threats": [],
+            "risk_score": 0,
+            "risk_details": [],
+            "ml_probability": -1, 
+            "ml_features": [],
+            "status": "clean"
+        }
+
+        if not os.path.exists(filepath):
+            report["error"] = "파일을 찾을 수 없습니다."
+            return report
 
         try:
             pe = pefile.PE(filepath)
             
-            if not hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
-                print("⚠️  임포트 테이블(IAT)을 찾을 수 없습니다. (패킹된 파일 가능성)")
-                return {}, set()
-
-            for entry in pe.DIRECTORY_ENTRY_IMPORT:
-                dll_name = entry.dll.decode('utf-8').lower()
-                apis = []
-                for imp in entry.imports:
-                    if imp.name:
-                        api_name = imp.name.decode('utf-8')
-                        apis.append(api_name)
-                        imported_apis.add(api_name)
+            # === Layer 1 & 2: 엔트로피 및 정적 분석 ===
+            score = 0
+            details = []
+            
+            # [1] 섹션 분석
+            for sec in pe.sections:
+                e = self._calculate_entropy(sec.get_data())
+                name = sec.Name.decode('utf-8', errors='ignore').strip('\x00')
                 
-                iat_info[dll_name] = apis
-            
-            return iat_info, imported_apis
+                # Layer 1: 엔트로피 기반 탐지
+                if e > 7.2:
+                    score += 30
+                    details.append(f"높은 엔트로피 감지: {name} ({e:.2f}) - 패킹/암호화 의심")
+                
+                # Layer 2: 정적 시그니처 (섹션명)
+                if 'UPX' in name.upper():
+                    score += 20
+                    details.append(f"알려진 패커 섹션 발견: {name}")
 
-        except pefile.PEFormatError as e:
-            print(f"[오류] 유효한 PE 파일이 아닙니다: {e}")
-            # ★★★ 웹 앱과의 연동을 위해 에러를 다시 발생시켜 app.py에서 잡도록 함
-            raise
+            # [2] IAT(Import Address Table) 분석 (보완된 로직)
+            iat_apis = set()
+            try:
+                if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
+                    for entry in pe.DIRECTORY_ENTRY_IMPORT:
+                        for imp in entry.imports:
+                            if imp.name:
+                                iat_apis.add(imp.name.decode('utf-8', errors='ignore'))
+                    
+                    # API가 너무 적으면 패킹 의심
+                    if len(iat_apis) < 10:
+                        score += 20
+                        details.append(f"임포트 API 부족 ({len(iat_apis)}개) - 정보 은닉 의심")
+            except Exception as e:
+                # IAT 파싱 실패 시 높은 가산점 (Anti-Analysis 기법 대응)
+                score += 50
+                details.append(f"IAT 파싱 치명적 오류 (손상된 헤더): {str(e)}")
+
+            # [3] 사용자 정의 룰 매칭 (Layer 2)
+            for rule in self.rules:
+                if set(rule['apis']).issubset(iat_apis):
+                    report["threats"].append(rule['name'])
+                    score += rule.get('score', 10)
+                    details.append(f"악성 행위 시그니처 탐지: {rule['name']}")
+
+            report["risk_score"] = min(score, 100)
+            report["risk_details"] = details
+
+            # === Layer 3: Machine Learning 예측 ===
+            if self.model and ML_AVAILABLE:
+                try:
+                    feats = self.extract_ml_features(pe)
+                    # 악성(1)일 확률 계산
+                    prob = self.model.predict_proba([feats])[0][1] * 100
+                    report["ml_probability"] = round(prob, 2)
+                    report["ml_features"] = feats
+                except Exception as e:
+                    details.append(f"ML 분석 중 오류: {e}")
+
+            # === 종합 판정 ===
+            # 정적 분석 점수가 높거나 ML 확률이 높으면 위험으로 판단
+            if report["risk_score"] >= 60 or report["ml_probability"] > 75:
+                report["status"] = "danger"
+            elif report["risk_score"] >= 30 or report["ml_probability"] > 45:
+                report["status"] = "warning"
+
+            pe.close()
+            return report
+
         except Exception as e:
-            print(f"[오류] 파일 파싱 중 예외 발생: {e}")
-            raise
-        finally:
-            if pe:
-                pe.close()
-    
-    # ↓↓↓ 들여쓰기를 수정하여 클래스 안으로 넣었습니다. ↓↓↓
-    def analyze_file(self, filepath):
-        """
-        파일의 IAT와 룰을 매칭하여 위협 리포트를 생성합니다. (수정됨: 결과를 반환)
-        """
-        if not os.path.exists(filepath):
-            print(f"[오류] 분석할 파일({filepath})을 찾을 수 없습니다.")
-            return os.path.basename(filepath), []
+            report["error"] = f"PE 파일 분석 실패: {str(e)}"
+            return report
 
-        iat_info, imported_apis = self.parse_iat(filepath)
-
-        if not imported_apis:
-            print("⚠️  임포트된 API가 없습니다.")
-            return os.path.basename(filepath), []
-
-        detected_threats = []
-        for rule in self.rules:
-            rule_apis = set(rule['apis'])
-            if imported_apis.issuperset(rule_apis):
-                detected_threats.append(rule)
-
-        danger_order = {"High": 3, "Medium": 2, "Low": 1}
-        sorted_threats = sorted(
-            detected_threats, 
-            key=lambda x: danger_order.get(x['danger'], 0), 
-            reverse=True
-        )
-        
-        return os.path.basename(filepath), sorted_threats
-    
-    # ↓↓↓ 들여쓰기를 수정하여 클래스 안으로 넣었습니다. ↓↓↓
-    def print_report(self, filename, detected_threats):
-        """
-        분석 결과를 포맷에 맞춰 출력합니다.
-        """
-        print(f"\n--- [ {filename} ] 최종 분석 리포트 ---")
-
-        if not detected_threats:
-            print("✅ 특이한 위협 행위가 발견되지 않았습니다. (정상 파일 가능성 높음)")
-            print("========================================")
-            return
-
-        danger_order = {"High": 3, "Medium": 2, "Low": 1}
-        sorted_threats = sorted(
-            detected_threats, 
-            key=lambda x: danger_order.get(x['danger'], 0), 
-            reverse=True
-        )
-
-        print(f"🚨 총 {len(sorted_threats)}개의 잠재적 위협 행위가 탐지되었습니다.")
-        
-        for threat in sorted_threats:
-            print("\n" + ("-"*30))
-            print(f"  위협명: {threat['name']} (위험도: {threat['danger']})")
-            print(f"  설명: {threat['description']}")
-            print(f"  근거 API: {', '.join(threat['apis'])}")
-            
-        print("\n========================================")
-
-
-# --- 스크립트 실행 (이 부분은 웹 앱과 무관, 단독 실행 시에만 사용됨) ---
+# --- 실행 테스트 코드 ---
 if __name__ == "__main__":
-    RULES_JSON_PATH = "rules.json"
-    analyzer = PEAnalyzer(RULES_JSON_PATH)
+    # 1. 테스트용 룰 파일 생성 (없을 경우)
+    if not os.path.exists("rules.json"):
+        dummy_rules = {
+            "signatures": [
+                {"name": "Process Injection", "apis": ["VirtualAllocEx", "WriteProcessMemory"], "score": 20},
+                {"name": "Keylogging", "apis": ["GetAsyncKeyState", "SetWindowsHookExA"], "score": 15}
+            ]
+        }
+        with open("rules.json", "w") as f:
+            json.dump(dummy_rules, f)
+        print("[*] 테스트용 rules.json 생성됨")
 
-    if len(sys.argv) < 2:
-        print("\n[사용법] python pe_analyzer.py <분석할_파일.exe>")
-        print("\n[테스트] 윈도우 계산기(calc.exe)를 분석합니다...")
-        filename, results = analyzer.analyze_file(r"C:\Windows\System32\calc.exe")
-        analyzer.print_report(filename, results) # 결과를 받아서 출력하도록 수정
-    else:
-        target_file = sys.argv[1]
-        filename, results = analyzer.analyze_file(target_file)
-        analyzer.print_report(filename, results) # 결과를 받아서 출력하도록 수정
+    # 2. 분석기 초기화
+    analyzer = PEAnalyzer()
+    
+    # 3. 분석할 파일 경로 (현재 실행 중인 자기 자신을 분석하거나, 특정 exe 경로 입력)
+    # 예: target_file = "C:\\Windows\\System32\\calc.exe"
+    import sys
+    target_file = sys.executable # 현재 파이썬 인터프리터를 테스트로 분석
+    
+    print(f"\n[*] 분석 시작: {target_file}")
+    result = analyzer.analyze_file(target_file)
+    
+    print(json.dumps(result, indent=2, ensure_ascii=False))
