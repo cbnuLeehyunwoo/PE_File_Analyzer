@@ -26,4 +26,7 @@ uploads/
 .DS_Store
 Thumbs.db
 
+
+model/test_features_*.json
+model/train_features_*.json
 pe_model.pkl
