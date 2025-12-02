@@ -3,24 +3,24 @@ import json
 import os
 import math
 import joblib
-import numpy as np
+import sys
 from collections import Counter
 
-# --- ML 라이브러리 로드 시도 (없어도 실행 가능하도록 처리) ---
+# ML 라이브러리 임포트 확인 및 변수 설정
 try:
     from sklearn.ensemble import RandomForestClassifier
     ML_AVAILABLE = True
 except ImportError:
+    print("[!] scikit-learn이 설치되지 않았습니다. ML 기능이 비활성화됩니다.")
+    print("[!] pip install scikit-learn 명령어로 설치해주세요.")
     ML_AVAILABLE = False
-    print("⚠️ scikit-learn 미설치: ML 기능이 비활성화됩니다. (pip install scikit-learn)")
+    RandomForestClassifier = None
 
 class PEAnalyzer:
-    def __init__(self, rules_file='rules.json', model_path='pe_model.pkl'):
-        """
-        초기화 단계: 시그니처 룰 로드 및 ML 모델 준비
-        """
+    def __init__(self, rules_file='rules.json', yara_file=None, model_path='pe_model.pkl'):
         self.rules = []
         self.model_path = model_path
+        self.yara_file = yara_file 
         
         # 1. 룰 파일 로드
         if os.path.exists(rules_file):
@@ -30,109 +30,142 @@ class PEAnalyzer:
             except Exception as e:
                 print(f"[!] 룰 로드 실패: {e}")
         
-        # 2. ML 모델 초기화 (Layer 3)
+        # 2. ML 모델 초기화
         self.model = None
         if ML_AVAILABLE:
             self.load_or_train_model()
 
     def _calculate_entropy(self, data):
-        """Layer 1: 섀넌 엔트로피 계산 (무작위성 측정)"""
+        """기본 섀넌 엔트로피 계산 (0.0 ~ 8.0)"""
         if not data: return 0.0
         occ = Counter(data)
         length = len(data)
         return -sum((c/length) * math.log2(c/length) for c in occ.values())
 
-    def load_or_train_model(self):
-        """ML 모델 로드 또는 데모용 즉석 학습"""
-        if os.path.exists(self.model_path):
+    def _calculate_sliding_window_entropy(self, data, window_size=256, step=128):
+        """슬라이딩 윈도우 엔트로피 분석"""
+        if not data or len(data) < window_size:
+            return 0.0, []
+
+        max_entropy = 0.0
+        entropy_trace = []
+        
+        if len(data) > 1024 * 1024:  # 1MB 이상 최적화
+            step = 1024
+
+        for i in range(0, len(data) - window_size, step):
+            chunk = data[i:i + window_size]
+            entropy = self._calculate_entropy(chunk)
+            entropy_trace.append(entropy)
+            if entropy > max_entropy:
+                max_entropy = entropy
+        
+        return max_entropy, entropy_trace
+
+    def load_or_train_model(self, force_retrain=False):
+        """데모용 ML 모델 학습 (force_retrain=True일 경우 무조건 새로 학습)"""
+        
+        # 강제 재학습이 아니고 파일이 있으면 로드 시도
+        if not force_retrain and os.path.exists(self.model_path):
             try:
                 self.model = joblib.load(self.model_path)
                 return
             except: pass
 
-        # 모델이 없으면 데모 데이터로 학습 (보고서용 데모 로직)
-        # Features: [AvgEntropy, Sections, Imports, Ratio, SuspiciousName]
-        print("[*] 학습된 모델이 없어 데모 데이터로 학습을 진행합니다...")
+        if not ML_AVAILABLE:
+            return
+
+        print("[*] 새 모델 학습을 진행합니다...")
+        
+        # 기존 파일이 있다면 삭제 (충돌 방지)
+        if os.path.exists(self.model_path):
+            try:
+                os.remove(self.model_path)
+            except: pass
+
+        # Feature: [AvgEntropy, MaxLocalEntropy, NumSections, NumImports, Ratio]
+        # (현재 코드의 extract_ml_features가 5개를 반환하므로 학습 데이터도 5개여야 함)
         X = [
-            [4.5, 5, 120, 0.95, 0], # 정상 예시
-            [5.2, 4, 80, 0.98, 0],  # 정상 예시
-            [7.8, 8, 5, 0.2, 1],    # 악성 예시 (고엔트로피, 적은 임포트)
-            [7.2, 3, 10, 0.1, 1]    # 악성 예시
+            [4.5, 4.8, 5, 120, 0.95], # 정상
+            [5.2, 5.5, 4, 80, 0.98],  # 정상
+            [7.8, 7.9, 8, 5, 0.2],    # 악성
+            [4.2, 7.9, 6, 10, 0.4]    # 악성 (저엔트로피 패커)
         ]
-        y = [0, 0, 1, 1] # 0:정상, 1:악성
+        y = [0, 0, 1, 1] 
         self.model = RandomForestClassifier(n_estimators=10, random_state=42)
         self.model.fit(X, y)
-        joblib.dump(self.model, self.model_path)
+        try:
+            joblib.dump(self.model, self.model_path)
+            print("[*] 모델 저장 완료")
+        except Exception as e:
+            print(f"[!] 모델 저장 실패: {e}")
 
     def extract_ml_features(self, pe):
-        """ML 분석을 위한 특징 벡터 추출"""
-        # 1. 엔트로피 특징
-        entropies = [self._calculate_entropy(s.get_data()) for s in pe.sections]
-        avg_entropy = sum(entropies)/len(entropies) if entropies else 0
+        """ML 입력용 특징 벡터 추출 (5개 Feature)"""
+        # 1. 엔트로피
+        total_data = b''
+        for sec in pe.sections:
+            total_data += sec.get_data()
+            
+        avg_entropy = self._calculate_entropy(total_data)
+        max_local, _ = self._calculate_sliding_window_entropy(total_data, step=1024)
         
-        # 2. 임포트 함수 개수
+        # 2. 임포트 개수
         num_imports = 0
         if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
             for entry in pe.DIRECTORY_ENTRY_IMPORT:
                 num_imports += len(entry.imports)
         
-        # 3. 데이터 비율 (Raw vs Virtual)
+        # 3. 데이터 비율
         ratios = [s.SizeOfRawData / s.Misc_VirtualSize for s in pe.sections if s.Misc_VirtualSize > 0]
         avg_ratio = sum(ratios)/len(ratios) if ratios else 0
         
-        # 4. 의심스러운 섹션명
-        suspicious_names = ['UPX', '.packed', '.aspack', 'FSG', 'TE']
-        has_suspicious = 0
-        for sec in pe.sections:
-            sec_name = sec.Name.decode('utf-8', errors='ignore').strip('\x00')
-            if any(s in sec_name for s in suspicious_names):
-                has_suspicious = 1
-                break
-        
-        return [avg_entropy, len(pe.sections), num_imports, avg_ratio, has_suspicious]
+        return [avg_entropy, max_local, len(pe.sections), num_imports, avg_ratio]
 
     def analyze_file(self, filepath):
-        """
-        [핵심 로직] 3-Layer 분석 수행
-        Layer 1: 엔트로피 -> Layer 2: 정적 분석(Rule) -> Layer 3: ML 예측
-        """
+        """분석 파이프라인"""
         report = {
             "filename": os.path.basename(filepath),
-            "threats": [],
             "risk_score": 0,
-            "risk_details": [],
-            "ml_probability": -1, 
-            "ml_features": [],
-            "status": "clean"
+            "status": "clean",
+            "detection_log": [],
+            "section_details": [],
+            "ml_probability": 0,
+            "ml_features": [0, 0, 0, 0, 0]
         }
 
         if not os.path.exists(filepath):
-            report["error"] = "파일을 찾을 수 없습니다."
+            report["error"] = "파일 없음"
             return report
 
         try:
             pe = pefile.PE(filepath)
-            
-            # === Layer 1 & 2: 엔트로피 및 정적 분석 ===
             score = 0
-            details = []
             
-            # [1] 섹션 분석
+            # === Step 1: 심층 엔트로피 분석 ===
             for sec in pe.sections:
-                e = self._calculate_entropy(sec.get_data())
-                name = sec.Name.decode('utf-8', errors='ignore').strip('\x00')
+                sec_name = sec.Name.decode('utf-8', errors='ignore').strip('\x00')
+                sec_data = sec.get_data()
                 
-                # Layer 1: 엔트로피 기반 탐지
-                if e > 7.2:
-                    score += 30
-                    details.append(f"높은 엔트로피 감지: {name} ({e:.2f}) - 패킹/암호화 의심")
+                avg_e = self._calculate_entropy(sec_data)
+                max_local_e, _ = self._calculate_sliding_window_entropy(sec_data)
                 
-                # Layer 2: 정적 시그니처 (섹션명)
-                if 'UPX' in name.upper():
-                    score += 20
-                    details.append(f"알려진 패커 섹션 발견: {name}")
+                sec_info = {
+                    "name": sec_name,
+                    "avg_entropy": round(avg_e, 2),
+                    "max_local_entropy": round(max_local_e, 2)
+                }
+                report["section_details"].append(sec_info)
 
-            # [2] IAT(Import Address Table) 분석 (보완된 로직)
+                if avg_e > 7.2:
+                    score += 20
+                    report["detection_log"].append(f"[Step1] 고엔트로피 섹션 발견: {sec_name} (Avg: {avg_e:.2f})")
+                
+                elif avg_e < 6.0 and max_local_e > 7.8:
+                    score += 40
+                    report["detection_log"].append(f"[Step1] 은닉된 암호화 패턴 감지: {sec_name} (Max Local: {max_local_e:.2f})")
+
+            # === Step 2: IAT 및 룰 분석 ===
             iat_apis = set()
             try:
                 if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
@@ -141,73 +174,67 @@ class PEAnalyzer:
                             if imp.name:
                                 iat_apis.add(imp.name.decode('utf-8', errors='ignore'))
                     
-                    # API가 너무 적으면 패킹 의심
-                    if len(iat_apis) < 10:
-                        score += 20
-                        details.append(f"임포트 API 부족 ({len(iat_apis)}개) - 정보 은닉 의심")
-            except Exception as e:
-                # IAT 파싱 실패 시 높은 가산점 (Anti-Analysis 기법 대응)
+                    if len(iat_apis) < 5:
+                        score += 30
+                        report["detection_log"].append(f"[Step2] IAT API 부족 ({len(iat_apis)}개) - 임포트 은닉 의심")
+            except:
                 score += 50
-                details.append(f"IAT 파싱 치명적 오류 (손상된 헤더): {str(e)}")
+                report["detection_log"].append("[Step2] IAT 파싱 실패 - 헤더 손상 의심")
 
-            # [3] 사용자 정의 룰 매칭 (Layer 2)
             for rule in self.rules:
                 if set(rule['apis']).issubset(iat_apis):
-                    report["threats"].append(rule['name'])
                     score += rule.get('score', 10)
-                    details.append(f"악성 행위 시그니처 탐지: {rule['name']}")
+                    report["detection_log"].append(f"[Step2] 악성 행위 룰 매칭: {rule['name']}")
 
             report["risk_score"] = min(score, 100)
-            report["risk_details"] = details
 
-            # === Layer 3: Machine Learning 예측 ===
+            # === Step 3: ML 예측 (자동 복구 로직 추가) ===
             if self.model and ML_AVAILABLE:
                 try:
                     feats = self.extract_ml_features(pe)
-                    # 악성(1)일 확률 계산
-                    prob = self.model.predict_proba([feats])[0][1] * 100
-                    report["ml_probability"] = round(prob, 2)
                     report["ml_features"] = feats
+                    
+                    try:
+                        # 예측 시도
+                        prob = self.model.predict_proba([feats])[0][1] * 100
+                    except ValueError as ve:
+                        # [오류 해결 핵심] 차원 불일치(22 features vs 5 features) 발생 시
+                        print(f"[!] 모델 차원 불일치 감지({ve}). 모델 재학습을 수행합니다...")
+                        self.load_or_train_model(force_retrain=True)
+                        # 재학습 후 다시 예측
+                        prob = self.model.predict_proba([feats])[0][1] * 100
+
+                    report["ml_probability"] = round(prob, 2)
+                    
+                    if prob > 80:
+                        report["detection_log"].append(f"[Step3] ML 모델 고위험 예측 ({prob:.1f}%)")
                 except Exception as e:
-                    details.append(f"ML 분석 중 오류: {e}")
+                    print(f"ML Final Error: {e}")
+            else:
+                try:
+                    report["ml_features"] = self.extract_ml_features(pe)
+                except: pass
 
-            # === 종합 판정 ===
-            # 정적 분석 점수가 높거나 ML 확률이 높으면 위험으로 판단
-            if report["risk_score"] >= 60 or report["ml_probability"] > 75:
-                report["status"] = "danger"
-            elif report["risk_score"] >= 30 or report["ml_probability"] > 45:
-                report["status"] = "warning"
-
+            # 최종 상태 결정
+            if report["risk_score"] >= 60 or report["ml_probability"] > 80:
+                report["status"] = "DANGER (악성 의심)"
+            elif report["risk_score"] >= 30 or report["ml_probability"] > 50:
+                report["status"] = "WARNING (주의)"
+            
             pe.close()
             return report
 
         except Exception as e:
-            report["error"] = f"PE 파일 분석 실패: {str(e)}"
+            report["error"] = str(e)
             return report
 
-# --- 실행 테스트 코드 ---
 if __name__ == "__main__":
-    # 1. 테스트용 룰 파일 생성 (없을 경우)
     if not os.path.exists("rules.json"):
-        dummy_rules = {
-            "signatures": [
-                {"name": "Process Injection", "apis": ["VirtualAllocEx", "WriteProcessMemory"], "score": 20},
-                {"name": "Keylogging", "apis": ["GetAsyncKeyState", "SetWindowsHookExA"], "score": 15}
-            ]
-        }
         with open("rules.json", "w") as f:
-            json.dump(dummy_rules, f)
-        print("[*] 테스트용 rules.json 생성됨")
+            json.dump({"signatures": [{"name": "Injection", "apis": ["VirtualAlloc", "CreateRemoteThread"], "score": 30}]}, f)
 
-    # 2. 분석기 초기화
     analyzer = PEAnalyzer()
-    
-    # 3. 분석할 파일 경로 (현재 실행 중인 자기 자신을 분석하거나, 특정 exe 경로 입력)
-    # 예: target_file = "C:\\Windows\\System32\\calc.exe"
-    import sys
-    target_file = sys.executable # 현재 파이썬 인터프리터를 테스트로 분석
-    
-    print(f"\n[*] 분석 시작: {target_file}")
-    result = analyzer.analyze_file(target_file)
-    
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    target = sys.executable 
+    print(f"[*] 분석 대상: {target}")
+    res = analyzer.analyze_file(target)
+    print(json.dumps(res, indent=2, ensure_ascii=False))

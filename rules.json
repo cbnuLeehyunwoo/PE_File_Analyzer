@@ -1,35 +1,75 @@
 {
   "signatures": [
+
     {
       "name": "Process Injection (simple)",
-      "apis": [
-        "OpenProcess",
-        "VirtualAllocEx",
-        "WriteProcessMemory",
-        "CreateRemoteThread"
-      ],
+      "apis": ["OpenProcess", "VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"],
       "danger": "High",
-      "description": "프로세스 주입에 사용되는 API 조합"
+      "description": "다른 프로세스에 악성 코드 삽입"
     },
+
     {
       "name": "Memory patcher",
-      "apis": [
-        "VirtualProtect",
-        "VirtualAlloc"
-      ],
+      "apis": ["VirtualProtect", "VirtualAlloc"],
       "danger": "Medium",
-      "description": "런타임 코드 패치/메모리 실행 권한 변경 징후"
+      "description": "메모리 영역 보호 속성 변경"
     },
+
     {
       "name": "Downloader",
-      "apis": [
-        "URLDownloadToFileA",
-        "URLDownloadToFileW",
-        "InternetOpenA",
-        "InternetOpenUrlA"
-      ],
+      "apis": ["URLDownloadToFileA", "URLDownloadToFileW", "InternetOpenA", "InternetOpenUrlA"],
       "danger": "High",
-      "description": "원격 파일 다운로드 관련 API"
+      "description": "외부 서버에서 파일 다운로드"
+    },
+
+    {
+      "name": "Keylogger",
+      "apis": ["SetWindowsHookExA", "GetAsyncKeyState"],
+      "danger": "High",
+      "description": "키 입력 가로채기 시도"
+    },
+
+    {
+      "name": "Persistence (Registry)",
+      "apis": ["RegCreateKeyExA", "RegSetValueExA"],
+      "danger": "High",
+      "description": "윈도우 시작 프로그램 등록"
+    },
+
+    {
+      "name": "Screen Capture",
+      "apis": ["GetDC", "BitBlt"],
+      "danger": "Medium",
+      "description": "화면 캡처 행위"
+    },
+
+    {
+      "name": "Self Delete",
+      "apis": ["DeleteFileA", "MoveFileExA"],
+      "danger": "Medium",
+      "description": "분석 회피를 위한 흔적 삭제"
+    },
+
+    {
+      "name": "Anti-Debugging",
+      "apis": ["IsDebuggerPresent", "CheckRemoteDebuggerPresent"],
+      "danger": "Medium",
+      "description": "디버깅 탐지 시 종료"
+    },
+
+    {
+      "name": "Privilege Escalation",
+      "apis": ["AdjustTokenPrivileges", "OpenProcessToken"],
+      "danger": "High",
+      "description": "권한 상승 가능성"
+    },
+
+    {
+      "name": "Service Install",
+      "apis": ["CreateServiceA", "StartServiceA"],
+      "danger": "High",
+      "description": "시스템 서비스로 등록"
     }
+
   ]
 }

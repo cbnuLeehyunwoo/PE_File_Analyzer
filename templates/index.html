@@ -4,114 +4,169 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PE 악성코드 정밀 분석기</title>
-    <!-- Tailwind CSS (디자인용) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700&display=swap');
         body { font-family: 'Noto Sans KR', sans-serif; }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="bg-slate-100 min-h-screen p-6">
 
-    <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden">
+    <div class="max-w-5xl mx-auto bg-white rounded-xl shadow-2xl overflow-hidden">
         <!-- 헤더 -->
-        <div class="bg-slate-800 p-6 text-white text-center">
-            <h1 class="text-2xl font-bold">🛡️ AI 기반 PE 파일 위협 분석기</h1>
-            <p class="text-sm opacity-80 mt-1">Machine Learning & Heuristic Analysis</p>
+        <div class="bg-gradient-to-r from-slate-800 to-slate-900 p-8 text-white text-center">
+            <h1 class="text-3xl font-bold tracking-tight">🛡️ AI 기반 PE 파일 위협 분석기</h1>
+            <p class="text-slate-300 mt-2">Entropy Sliding Window & Random Forest Analysis</p>
         </div>
 
         <!-- 메인 컨텐츠 -->
         <div class="p-8">
             <!-- 1. 업로드 폼 -->
-            <form action="/analyze" method="post" enctype="multipart/form-data" class="mb-8 border-b pb-8">
+            <form action="/analyze" method="post" enctype="multipart/form-data" class="mb-10 border-b border-slate-200 pb-10">
                 <div class="flex flex-col items-center justify-center w-full">
-                    <label for="dropzone-file" class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
+                    <label for="dropzone-file" class="flex flex-col items-center justify-center w-full h-40 border-2 border-slate-300 border-dashed rounded-xl cursor-pointer bg-slate-50 hover:bg-slate-100 transition duration-300">
                         <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                            <p class="mb-2 text-sm text-gray-500"><span class="font-semibold">클릭하여 파일 업로드</span> 또는 드래그 앤 드롭</p>
-                            <p class="text-xs text-gray-500">EXE, DLL 파일 (최대 16MB)</p>
+                            <svg class="w-10 h-10 mb-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                            <p class="mb-2 text-sm text-slate-500"><span class="font-semibold">파일을 클릭하거나 드래그하여 업로드</span></p>
+                            <p class="text-xs text-slate-500">지원 형식: .EXE, .DLL (최대 32MB)</p>
                         </div>
                         <input id="dropzone-file" type="file" name="file" class="hidden" accept=".exe,.dll" required />
                     </label>
-                    <button type="submit" class="mt-4 px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition w-full">
+                    <button type="submit" class="mt-6 px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg transition transform hover:-translate-y-0.5">
                         🚀 정밀 분석 시작
                     </button>
                 </div>
             </form>
 
-            <!-- 2. 결과 리포트 (report가 있을 때만 표시) -->
+            <!-- 2. 결과 리포트 -->
             {% if report %}
-            <div class="animate-fade-in-up">
-                <h2 class="text-xl font-bold mb-4 flex items-center">
-                    📂 분석 결과: <span class="text-blue-600 ml-2">{{ report.filename }}</span>
-                </h2>
+            <div class="animate-fade-in-up space-y-8">
+                
+                <!-- 파일명 및 상태 배지 -->
+                <div class="flex justify-between items-center border-b pb-4">
+                    <h2 class="text-2xl font-bold text-slate-800 flex items-center">
+                        📄 <span class="ml-2">{{ report.filename }}</span>
+                    </h2>
+                    <span class="px-4 py-1 rounded-full text-sm font-bold shadow-sm
+                        {% if report.status == 'DANGER' %} bg-red-100 text-red-700 border border-red-200
+                        {% elif report.status == 'WARNING' %} bg-orange-100 text-orange-700 border border-orange-200
+                        {% else %} bg-green-100 text-green-700 border border-green-200 {% endif %}">
+                        {{ report.status }}
+                    </span>
+                </div>
 
-                <!-- 2-1. 종합 판정 -->
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <!-- 정적 분석 점수 -->
-                    <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <h3 class="font-bold text-gray-700 mb-2">📊 정적 분석 점수 (Risk Score)</h3>
-                        <div class="flex items-center">
-                            <div class="text-4xl font-extrabold mr-3 
-                                {% if report.risk_score >= 80 %}text-red-600{% elif report.risk_score >= 40 %}text-orange-500{% else %}text-green-600{% endif %}">
-                                {{ report.risk_score }}
-                            </div>
-                            <span class="text-sm text-gray-500">/ 100점</span>
+                <!-- 2-1. 핵심 지표 (3 Grid) -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- 종합 점수 -->
+                    <div class="bg-white p-6 rounded-xl border shadow-sm text-center">
+                        <h3 class="text-gray-500 font-bold mb-2 uppercase text-xs">Total Risk Score</h3>
+                        <div class="text-5xl font-extrabold mb-1
+                            {% if report.risk_score >= 60 %}text-red-600{% elif report.risk_score >= 30 %}text-orange-500{% else %}text-green-600{% endif %}">
+                            {{ report.risk_score }}
                         </div>
-                        <p class="text-xs text-gray-400 mt-1">높을수록 패킹/난독화 가능성 높음</p>
+                        <p class="text-xs text-gray-400">종합 위험도</p>
                     </div>
 
-                    <!-- AI ML 예측 -->
-                    <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <h3 class="font-bold text-gray-700 mb-2">🤖 AI(머신러닝) 예측</h3>
+                    <div class="bg-white p-6 rounded-xl border shadow-sm">
+                        <h3 class="text-gray-500 font-bold mb-4 uppercase text-xs text-center">Entropy Analysis</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-600">전체 평균 (Global)</span>
+                                    <span class="font-bold
+                                        {% if report.entropy_info.avg > 7.2 %}text-red-600
+                                        {% elif report.entropy_info.avg > 6.8 %}text-orange-500
+                                        {% else %}text-blue-600{% endif %}">
+                                        {{ report.entropy_info.avg }}
+                                    </span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2">
+                                    <div class="h-2 rounded-full transition-all duration-1000
+                                        {% if report.entropy_info.avg > 7.2 %}bg-red-500
+                                        {% elif report.entropy_info.avg > 6.8 %}bg-orange-500
+                                        {% else %}bg-blue-500{% endif %}" 
+                                        style="width: {{ (report.entropy_info.avg / 8.0) * 100 }}%">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="font-semibold text-gray-600">국소 최대 (Local Max)</span>
+                                    <span class="font-bold 
+                                        {% if report.entropy_info.max_local > 7.2 %}text-red-600
+                                        {% elif report.entropy_info.max_local > 6.5 %}text-orange-500
+                                        {% else %}text-green-600{% endif %}">
+                                        {{ report.entropy_info.max_local }}
+                                    </span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2">
+                                    <div class="h-2 rounded-full transition-all duration-1000
+                                        {% if report.entropy_info.max_local > 7.2 %}bg-red-500
+                                        {% elif report.entropy_info.max_local > 6.5 %}bg-orange-500
+                                        {% else %}bg-green-500{% endif %}" 
+                                        style="width: {{ (report.entropy_info.max_local / 8.0) * 100 }}%">
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-1 text-right">높을수록 은닉 코드 존재 가능성 ↑</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ML 예측 -->
+                    <div class="bg-white p-6 rounded-xl border shadow-sm text-center">
+                        <h3 class="text-gray-500 font-bold mb-2 uppercase text-xs">AI Prediction</h3>
                         {% if report.ml_probability != -1 %}
-                            <div class="flex items-center">
-                                <div class="text-4xl font-extrabold mr-3 
-                                    {% if report.ml_probability >= 70 %}text-red-600{% elif report.ml_probability >= 40 %}text-orange-500{% else %}text-green-600{% endif %}">
-                                    {{ report.ml_probability }}%
-                                </div>
-                                <span class="text-sm text-gray-500">악성 확률</span>
+                            <div class="text-5xl font-extrabold mb-1 text-purple-600">
+                                {{ report.ml_probability }}<span class="text-2xl">%</span>
                             </div>
-                            <div class="text-xs text-gray-500 mt-1">
-                                엔트로피: {{ report.ml_features[0]|round(2) }} | 
-                                API 수: {{ report.ml_features[2] }}개
-                            </div>
+                            <p class="text-xs text-gray-400">악성 확률 (Random Forest)</p>
                         {% else %}
-                            <p class="text-gray-400">scikit-learn 모듈이 없어 비활성화됨</p>
+                            <p class="text-gray-400 mt-4">ML 비활성화됨</p>
                         {% endif %}
                     </div>
                 </div>
 
-                <!-- 2-2. 상세 탐지 내용 -->
-                <div class="mb-6">
-                    <h3 class="font-bold text-gray-800 border-l-4 border-red-500 pl-3 mb-3">🔍 상세 탐지 내역</h3>
-                    <ul class="space-y-2 text-sm">
-                        <!-- Risk Details -->
-                        {% for detail in report.risk_details %}
-                            <li class="flex items-start text-orange-700 bg-orange-50 p-2 rounded">
-                                <span class="mr-2">⚠️</span> {{ detail }}
+                <!-- 2-2. 상세 탐지 로그 -->
+                <div class="bg-slate-50 rounded-xl p-6 border border-slate-200">
+                    <h3 class="font-bold text-slate-800 flex items-center mb-4">
+                        🔍 상세 분석 로그
+                    </h3>
+                    
+                    {% if report.detection_log %}
+                        <ul class="space-y-3">
+                        {% for log in report.detection_log %}
+                            <li class="flex items-start p-3 bg-white rounded-lg border border-slate-200 shadow-sm
+                                {% if 'Step1' in log %} border-l-4 border-l-blue-500
+                                {% elif 'Step2' in log %} border-l-4 border-l-green-500
+                                {% elif 'Step3' in log %} border-l-4 border-l-purple-500
+                                {% else %} border-l-4 border-l-red-500 {% endif %}">
+                                
+                                <span class="mr-3 text-lg">
+                                    {% if 'Step1' in log %}🧊{% elif 'Step2' in log %}📜{% elif 'Step3' in log %}🤖{% else %}⚠️{% endif %}
+                                </span>
+                                <span class="text-sm text-slate-700 font-medium">{{ log }}</span>
                             </li>
                         {% endfor %}
-
-                        <!-- Threats (Rules) -->
-                        {% for threat in report.threats %}
-                            <li class="flex items-start text-red-700 bg-red-50 p-2 rounded">
-                                <span class="mr-2">🚨</span> 
-                                <div>
-                                    <span class="font-bold">[{{ threat.name }}]</span> {{ threat.description }}
-                                    <br><span class="text-xs text-gray-500">관련 API: {{ ', '.join(threat.apis) }}</span>
-                                </div>
-                            </li>
-                        {% endfor %}
-
-                        {% if not report.risk_details and not report.threats %}
-                            <li class="text-green-600 bg-green-50 p-2 rounded">✅ 특이한 위협 요소가 발견되지 않았습니다.</li>
-                        {% endif %}
-                    </ul>
+                        </ul>
+                    {% else %}
+                        <div class="text-center py-6 bg-white rounded-lg border border-slate-200">
+                            <span class="text-4xl">✅</span>
+                            <p class="text-slate-500 mt-2">탐지된 위협이 없습니다. (Clean File)</p>
+                        </div>
+                    {% endif %}
                 </div>
+
+                <!-- 디버그 정보 -->
+                {% if report.ml_features %}
+                <div class="text-xs text-gray-400 text-right mt-4">
+                    Debug: Features [Entropy: {{ report.ml_features[0]|round(2) }}, MaxLocal: {{ report.ml_features[1]|round(2) }}, Imports: {{ report.ml_features[3] }}]
+                </div>
+                {% endif %}
 
                 {% if report.error %}
-                <div class="bg-red-100 text-red-700 p-4 rounded-lg">
-                    ❌ 오류 발생: {{ report.error }}
+                <div class="bg-red-50 text-red-700 p-4 rounded-lg border border-red-200 flex items-center">
+                    <span class="text-xl mr-3">❌</span> {{ report.error }}
                 </div>
                 {% endif %}
 
@@ -121,7 +176,6 @@
     </div>
 
     <script>
-        // 파일 선택 시 이름 표시 스크립트
         const fileInput = document.getElementById('dropzone-file');
         fileInput.addEventListener('change', function(e) {
             if(e.target.files.length > 0) {
